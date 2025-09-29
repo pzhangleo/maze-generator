@@ -22,6 +22,12 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     common.add_argument("--height", type=int, default=None, help="Custom maze height (overrides difficulty preset)")
     common.add_argument("--seed", type=int, default=None, help="Random seed for reproducible mazes")
     common.add_argument("--style", default="classic", choices=list(STYLES.keys()), help="Visual style for rendering")
+    common.add_argument(
+        "--cell-shape",
+        default="square",
+        choices=["square", "hex"],
+        help="Shape of the maze cells",
+    )
 
     preview_parser = subparsers.add_parser("preview", parents=[common], help="Generate preview images of the maze")
     preview_parser.add_argument("--output", type=Path, default=Path("previews"), help="Directory to save preview images")
@@ -43,6 +49,7 @@ def _create_maze(args: argparse.Namespace):
         width=args.width,
         height=args.height,
         seed=args.seed,
+        cell_shape=args.cell_shape,
     )
 
 

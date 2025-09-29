@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, List, Sequence, Tuple
+from typing import List, Sequence, Tuple
 
 from .maze import Maze
 from .styles import MazeStyle, get_style
@@ -19,31 +19,6 @@ class RenderResult:
     solution_path: Path
 
 
-def _wall_segments(maze: Maze) -> Iterable[Tuple[Tuple[float, float], Tuple[float, float]]]:
-    for y in range(maze.height):
-        for x in range(maze.width):
-            cell = maze.cell(x, y)
-            left, right = x, x + 1
-            top, bottom = y, y + 1
-            if cell.walls["N"]:
-                yield (left, top), (right, top)
-            if cell.walls["S"]:
-                yield (left, bottom), (right, bottom)
-            if cell.walls["W"]:
-                yield (left, top), (left, bottom)
-            if cell.walls["E"]:
-                yield (right, top), (right, bottom)
-
-
-def _path_points(path: Sequence[Tuple[int, int]]) -> Tuple[List[float], List[float]]:
-    xs: List[float] = []
-    ys: List[float] = []
-    for x, y in path:
-        xs.append(x + 0.5)
-        ys.append(y + 0.5)
-    return xs, ys
-
-
 def _scale_point(x: float, y: float) -> Tuple[float, float]:
     return MARGIN + x * CELL_SIZE, MARGIN + y * CELL_SIZE
 
@@ -56,7 +31,7 @@ def _svg_header(width: float, height: float, background: str) -> List[str]:
     ]
 
 
-def _svg_lines(segments: Iterable[Tuple[Tuple[float, float], Tuple[float, float]]], style: MazeStyle) -> List[str]:
+def _svg_lines(segments: Sequence[Tuple[Tuple[float, float], Tuple[float, float]]], style: MazeStyle) -> List[str]:
     lines: List[str] = []
     for (x1, y1), (x2, y2) in segments:
         sx1, sy1 = _scale_point(x1, y1)
@@ -67,9 +42,9 @@ def _svg_lines(segments: Iterable[Tuple[Tuple[float, float], Tuple[float, float]
     return lines
 
 
-def _svg_solution(path: Sequence[Tuple[int, int]], style: MazeStyle) -> str:
-    xs, ys = _path_points(path)
-    points = ["{:.2f},{:.2f}".format(*_scale_point(x, y)) for x, y in zip(xs, ys)]
+def _svg_solution(path: Sequence[Tuple[int, int]], style: MazeStyle, maze: Maze) -> str:
+    centers = maze.path_points(path)
+    points = ["{:.2f},{:.2f}".format(*_scale_point(x, y)) for x, y in centers]
     return (
         f"  <polyline points=\"{' '.join(points)}\" "
         f"fill=\"none\" stroke=\"{style.solution_color}\" stroke-width=\"{style.solution_width}\" "
@@ -82,12 +57,13 @@ def _svg_footer() -> List[str]:
 
 
 def render_maze_svg(maze: Maze, style: MazeStyle, show_solution: bool = False) -> str:
-    width = maze.width * CELL_SIZE + MARGIN * 2
-    height = maze.height * CELL_SIZE + MARGIN * 2
+    unit_width, unit_height = maze.layout_size()
+    width = unit_width * CELL_SIZE + MARGIN * 2
+    height = unit_height * CELL_SIZE + MARGIN * 2
     svg_parts = _svg_header(width, height, style.background_color)
-    svg_parts.extend(_svg_lines(_wall_segments(maze), style))
+    svg_parts.extend(_svg_lines(list(maze.wall_segments()), style))
     if show_solution:
-        svg_parts.append(_svg_solution(maze.solve(), style))
+        svg_parts.append(_svg_solution(maze.solve(), style, maze))
     svg_parts.extend(_svg_footer())
     return "\n".join(svg_parts)
 
@@ -112,8 +88,9 @@ def _pdf_stream_for_page(
     show_solution: bool,
     metadata: str | None = None,
 ) -> Tuple[str, float, float]:
-    width = maze.width * CELL_SIZE + MARGIN * 2
-    height = maze.height * CELL_SIZE + MARGIN * 2
+    unit_width, unit_height = maze.layout_size()
+    width = unit_width * CELL_SIZE + MARGIN * 2
+    height = unit_height * CELL_SIZE + MARGIN * 2
     commands: List[str] = []
 
     # Background
@@ -128,7 +105,7 @@ def _pdf_stream_for_page(
     commands.append("q")
     commands.append(f"{style.wall_width} w")
     commands.append(f"{wall_r} {wall_g} {wall_b} RG")
-    for (x1, y1), (x2, y2) in _wall_segments(maze):
+    for (x1, y1), (x2, y2) in maze.wall_segments():
         sx1, sy1 = _scale_point(x1, y1)
         sx2, sy2 = _scale_point(x2, y2)
         sy1_pdf = height - sy1
@@ -138,14 +115,14 @@ def _pdf_stream_for_page(
 
     if show_solution:
         sol_r, sol_g, sol_b = _hex_to_rgb(style.solution_color)
-        xs, ys = _path_points(maze.solve())
-        if xs and ys:
+        centers = maze.path_points(maze.solve())
+        if centers:
             commands.append("q")
             commands.append(f"{style.solution_width} w")
             commands.append(f"{sol_r} {sol_g} {sol_b} RG")
-            first_x, first_y = _scale_point(xs[0], ys[0])
+            first_x, first_y = _scale_point(*centers[0])
             commands.append(f"{first_x:.2f} {height - first_y:.2f} m")
-            for x, y in zip(xs[1:], ys[1:]):
+            for x, y in centers[1:]:
                 sx, sy = _scale_point(x, y)
                 commands.append(f"{sx:.2f} {height - sy:.2f} l")
             commands.append("S")
