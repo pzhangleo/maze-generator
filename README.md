@@ -27,7 +27,7 @@ python -m maze_generator.cli export-pdf [参数]
 
 常用参数：
 
-- `--difficulty {easy,medium,hard}`：选择难度，默认 `medium`。
+- `--difficulty {easy,medium,hard}`：选择难度，默认 `medium`。难度会根据迷宫格子总数动态调整墙体循环密度，因此自定义的尺寸会自动匹配合适的复杂度。
 - `--width --height`：自定义迷宫尺寸，覆盖难度默认尺寸。
 - `--style {classic,blueprint,night}`：选择渲染样式。
 - `--seed`：设置随机种子以便复现。

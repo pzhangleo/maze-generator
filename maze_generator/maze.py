@@ -183,9 +183,9 @@ def generate_maze(
     """Factory function that creates and returns a generated maze."""
 
     difficulty_profiles = {
-        "easy": {"width": 12, "height": 12, "loop_factor": 0.05},
-        "medium": {"width": 20, "height": 20, "loop_factor": 0.15},
-        "hard": {"width": 28, "height": 28, "loop_factor": 0.25},
+        "easy": {"width": 12, "height": 12, "loop_factor": 0.05, "max_cells": 12 * 12},
+        "medium": {"width": 20, "height": 20, "loop_factor": 0.15, "max_cells": 22 * 22},
+        "hard": {"width": 28, "height": 28, "loop_factor": 0.25, "max_cells": None},
     }
 
     profile = difficulty_profiles.get(difficulty)
@@ -197,11 +197,22 @@ def generate_maze(
     maze_width = width or profile["width"]
     maze_height = height or profile["height"]
 
+    cell_count = maze_width * maze_height
+    # Determine loop density dynamically based on the final maze size so that
+    # custom dimensions still produce an appropriate difficulty level.
+    for data in difficulty_profiles.values():
+        max_cells = data["max_cells"]
+        if max_cells is None or cell_count <= max_cells:
+            loop_factor = data["loop_factor"]
+            break
+    else:  # pragma: no cover - logically unreachable because "hard" has max_cells=None
+        loop_factor = profile["loop_factor"]
+
     maze = Maze(
         width=maze_width,
         height=maze_height,
         seed=seed,
-        loop_factor=profile["loop_factor"],
+        loop_factor=loop_factor,
     )
     maze.generate()
     return maze
