@@ -69,6 +69,7 @@ python -m maze_generator.cli preview --cell-shape hex --style night --output pre
 
 上面的命令会生成六边形迷宫的 SVG 预览与解答图。同样的参数也适用于 `generate`（ASCII）与 `export-pdf`。当选择 `hex` 时，ASCII 输出会使用适配六边形的字符排布，而 PDF 与 SVG 则采用相应的六边形几何布局。
 
+
 ### 生成 ASCII 预览
 
 ```bash
@@ -78,6 +79,7 @@ python -m maze_generator.cli generate --difficulty easy --seed 42
 终端会直接输出 ASCII 版迷宫，适合快速验证参数效果。
 
 提示：若使用 `--cell-shape hex`，生成的 ASCII 会自动转为适配六边形网格的字符画格式。
+
 
 ### 生成 SVG 预览
 
@@ -91,6 +93,7 @@ python -m maze_generator.cli preview --difficulty hard --style blueprint --outpu
 - `maze_<style>_solution.svg`：带解答路径的迷宫图。
 
 命令执行后会在终端打印两个 SVG 文件的路径，方便脚本自动化处理或调试。
+
 
 ### 导出 PDF
 
