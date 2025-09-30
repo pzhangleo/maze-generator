@@ -29,6 +29,14 @@ python -m maze_generator.cli preview [参数]
 python -m maze_generator.cli export-pdf [参数]
 ```
 
+每个子命令在通用参数之外，还额外提供了以下选项：
+
+| 子命令 | 额外参数 | 说明 |
+| --- | --- | --- |
+| `generate` | *(无)* | 直接在终端输出 ASCII 迷宫。 |
+| `preview` | `--output PATH` | 指定 SVG 预览图输出目录（默认 `previews/`，若不存在会自动创建）。 |
+| `export-pdf` | `--pdf PATH`<br>`--title TEXT` | 自定义 PDF 路径与标题，标题会同步显示在解答页 `Solution – <标题>` 上。 |
+
 ### 通用参数
 
 所有子命令都支持以下参数：
@@ -77,7 +85,7 @@ python -m maze_generator.cli generate --difficulty easy --seed 42
 python -m maze_generator.cli preview --difficulty hard --style blueprint --output previews
 ```
 
-该命令会在指定目录（默认 `previews/`）生成两份文件：
+该命令会在指定目录（默认 `previews/`，不存在时会自动创建）生成两份文件：
 
 - `maze_<style>.svg`：迷宫图。
 - `maze_<style>_solution.svg`：带解答路径的迷宫图。
@@ -90,9 +98,8 @@ python -m maze_generator.cli preview --difficulty hard --style blueprint --outpu
 python -m maze_generator.cli export-pdf --difficulty medium --style night --pdf output/maze.pdf --title "Team Maze Challenge"
 ```
 
-导出的 PDF 含两页，第一页为迷宫，第二页为解答页。若提供 `--title`，第一页会显示标题，第二页自动添加 `Solution – <标题>`。
-
-`--pdf` 默认值为 `maze.pdf`，成功导出后命令行会打印生成的 PDF 路径。
+导出的 PDF 含两页，第一页为迷宫，第二页为解答页。若提供 `--title`，第一页会显示标题，第二页自动添加 `Solution – <标题>`。命令执行
+完成后会打印最终生成的 PDF 路径，便于脚本继续处理或提示用户；默认输出文件名为 `maze.pdf`，可通过 `--pdf` 自定义。
 
 ### 选择输出格式
 
@@ -111,16 +118,40 @@ python -m maze_generator.cli export-pdf --difficulty medium --style night --pdf 
 ```python
 from pathlib import Path
 
-from maze_generator import generate_maze, save_preview_images, export_maze_pdf
+from maze_generator import Maze, export_maze_pdf, generate_maze, save_preview_images
+from maze_generator.render import render_maze_figure
+from maze_generator.styles import get_style
 
-maze = generate_maze(difficulty="medium", seed=123, cell_shape="hex")
-preview = save_preview_images(maze, style_name="classic", directory=Path("previews"))
-export_maze_pdf(maze, style_name="night", pdf_path=Path("maze.pdf"), metadata="My Maze")
+maze: Maze = generate_maze(difficulty="medium", seed=123, cell_shape="hex")
+
+# ASCII 渲染与求解
+print(maze.ascii_render())
+solution_route = maze.solve()
+print(solution_route)
+
+# 生成 SVG 预览，可自定义文件名前缀
+preview = save_preview_images(
+    maze,
+    style_name="classic",
+    directory=Path("previews"),
+    prefix="demo",
+)
+print(preview.figure_path)
+print(preview.solution_path)
+
+# 导出 PDF，并可复用 render_maze_figure 获取 SVG 字符串
+pdf_path = export_maze_pdf(
+    maze,
+    pdf_path=Path("maze.pdf"),
+    style_name="night",
+    metadata="My Maze",
+)
+svg_markup = render_maze_figure(maze, get_style("night"))
 ```
 
-- `generate_maze` 返回一个已经生成好的迷宫对象，包含求解和 ASCII 渲染等实用方法。
-- `save_preview_images` 返回包含迷宫与解答 SVG 文件路径的结果对象，属性为 `figure_path` 与 `solution_path`。
-- `export_maze_pdf` 生成两页 PDF，并返回输出文件路径。
+- `generate_maze` 返回一个已经生成好的迷宫对象，可直接调用 `ascii_render()`、`solve()` 等方法。
+- `save_preview_images` 返回包含迷宫与解答 SVG 文件路径的结果对象，属性为 `figure_path` 与 `solution_path`，并允许通过 `prefix` 控制输出文件名前缀。
+- `export_maze_pdf` 生成两页 PDF，返回最终的 `Path` 对象；如需直接获取 SVG 字符串，可结合 `render_maze_figure` 与 `get_style()`。
 
 ## 目录结构
 
