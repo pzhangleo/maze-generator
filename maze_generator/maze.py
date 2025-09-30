@@ -32,6 +32,8 @@ class Maze:
         branching_chance: float = 0.35,
         cell_shape: str = "square",
         detour_bias: float = 0.0,
+        turn_bias: float = 0.35,
+        max_straight: int = 3,
     ) -> None:
         if width <= 1 or height <= 1:
             raise ValueError("Maze dimensions must be greater than 1x1")
@@ -43,6 +45,8 @@ class Maze:
         self.cell_shape = cell_shape
         self.branching_chance = max(0.0, min(1.0, branching_chance))
         self.detour_bias = max(0.0, min(1.0, detour_bias))
+        self.turn_bias = max(0.0, min(0.95, turn_bias))
+        self.max_straight = max(0, max_straight)
 
         if cell_shape == "square":
             self._directions: Tuple[Direction, ...] = ("N", "S", "E", "W")
@@ -99,6 +103,10 @@ class Maze:
         else:
             self._precompute_hex_layout()
 
+        # 记录每个格子进入时的方向和当前直线长度，生成过程中会动态更新
+        self._entry_direction: Dict[Tuple[int, int], Optional[Direction]] = {}
+        self._straight_run: Dict[Tuple[int, int], int] = {}
+
     def _remove_wall(self, cell: Cell, neighbour: Cell, direction: Direction) -> None:
         opposite = self._opposites[direction]
         cell.walls[direction] = False
@@ -139,6 +147,8 @@ class Maze:
         visited = {(0, 0)}
         total_cells = self.width * self.height
         active.append(start)
+        self._entry_direction[(0, 0)] = None
+        self._straight_run[(0, 0)] = 0
 
         while active:
             if len(active) == 1:
@@ -158,11 +168,22 @@ class Maze:
 
             if unvisited_neighbors:
                 direction, next_cell = self._select_next_cell(
-                    unvisited_neighbors, len(visited), total_cells
+                    unvisited_neighbors,
+                    len(visited),
+                    total_cells,
+                    self._entry_direction.get((x, y)),
+                    self._straight_run.get((x, y), 0),
                 )
                 self._remove_wall(current, next_cell, direction)
                 active.append(next_cell)
                 visited.add((next_cell.x, next_cell.y))
+                previous_direction = self._entry_direction.get((x, y))
+                if previous_direction is not None and direction == previous_direction:
+                    straight_length = self._straight_run.get((x, y), 0) + 1
+                else:
+                    straight_length = 1
+                self._entry_direction[(next_cell.x, next_cell.y)] = direction
+                self._straight_run[(next_cell.x, next_cell.y)] = straight_length
             else:
                 active.pop(index)
 
@@ -181,33 +202,87 @@ class Maze:
         options: Sequence[Tuple[Direction, Cell]],
         visited_count: int,
         total_cells: int,
+        previous_direction: Optional[Direction],
+        straight_run: int,
     ) -> Tuple[Direction, Cell]:
         if not options:
             raise ValueError("_select_next_cell requires at least one option")
 
+        directionally_weighted: List[Tuple[Tuple[Direction, Cell], float]] = []
+        for option in options:
+            direction, _ = option
+            weight = 1.0
+            if previous_direction is not None and direction == previous_direction:
+                if self.max_straight > 0 and straight_run >= self.max_straight:
+                    # 直线过长时强制尝试转向
+                    continue
+                # 同方向继续前进时降低权重，让迷宫避免长直线
+                weight *= 1.0 - self.turn_bias
+            else:
+                # 转弯时适度提高权重，鼓励路径产生折线
+                weight *= 1.0 + self.turn_bias
+            if weight > 0.0:
+                directionally_weighted.append((option, weight))
+
+        if not directionally_weighted:
+            # 如果所有方向都被限制，则退化为原始的可选方向
+            directionally_weighted = [(option, 1.0) for option in options]
+
         if self.detour_bias <= 0.0:
-            return self.random.choice(options)
+            weights = [weight for _, weight in directionally_weighted]
+            total_weight = sum(weights)
+            if total_weight <= 0.0:
+                return self.random.choice([option for option, _ in directionally_weighted])
+            pick = self.random.random() * total_weight
+            cumulative = 0.0
+            for option, weight in directionally_weighted:
+                cumulative += weight
+                if pick <= cumulative:
+                    return option
+            return directionally_weighted[-1][0]
 
         progress = visited_count / float(total_cells)
         bias_strength = self.detour_bias * max(0.0, 1.0 - progress)
         if bias_strength <= 0.0:
-            return self.random.choice(options)
+            weights = [weight for _, weight in directionally_weighted]
+            total_weight = sum(weights)
+            if total_weight <= 0.0:
+                return self.random.choice([option for option, _ in directionally_weighted])
+            pick = self.random.random() * total_weight
+            cumulative = 0.0
+            for option, weight in directionally_weighted:
+                cumulative += weight
+                if pick <= cumulative:
+                    return option
+            return directionally_weighted[-1][0]
 
-        distances = [self._distance_to_goal(cell.x, cell.y) for _, cell in options]
+        weighted_options: List[Tuple[float, Tuple[Direction, Cell]]] = []
+        base_options = [option for option, _ in directionally_weighted]
+        base_weights = [weight for _, weight in directionally_weighted]
+
+        distances = [self._distance_to_goal(cell.x, cell.y) for _, cell in base_options]
         max_distance = max(distances)
         min_distance = min(distances)
 
         if math.isclose(max_distance, min_distance):
-            return self.random.choice(options)
+            total_weight = sum(base_weights)
+            if total_weight <= 0.0:
+                return self.random.choice(base_options)
+            pick = self.random.random() * total_weight
+            cumulative = 0.0
+            for option, weight in zip(base_options, base_weights):
+                cumulative += weight
+                if pick <= cumulative:
+                    return option
+            return base_options[-1]
 
-        weighted_options: List[Tuple[float, Tuple[Direction, Cell]]] = []
-        for option, distance in zip(options, distances):
-            weight = 1.0 + bias_strength * (distance - min_distance)
+        for option, distance, direction_weight in zip(base_options, distances, base_weights):
+            weight = direction_weight * (1.0 + bias_strength * (distance - min_distance))
             weighted_options.append((max(weight, 0.0), option))
 
         total_weight = sum(weight for weight, _ in weighted_options)
         if total_weight <= 0.0:
-            return self.random.choice(options)
+            return self.random.choice(base_options)
 
         pick = self.random.random() * total_weight
         cumulative = 0.0
