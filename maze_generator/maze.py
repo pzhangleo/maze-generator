@@ -354,6 +354,14 @@ class Maze:
         if self.random.random() > self.hairpin_chance:
             return
 
+        # Avoid opening up already spacious areas. Only consider carving an
+        # extra turn when the current cell still resembles a corridor (i.e. it
+        # has at most two existing exits). Otherwise repeatedly carving
+        # hairpins can produce large rooms with few internal walls, which makes
+        # the maze feel sparse.
+        if self._openings(cell) >= 3:
+            return
+
         blocked_coords: Set[Tuple[int, int]] = set(blocked or set())
         parent_coord: Optional[Tuple[int, int]] = None
         if incoming_direction is not None:
@@ -368,6 +376,8 @@ class Maze:
             if coord == parent_coord or coord in blocked_coords:
                 continue
             if not cell.walls.get(direction, True):
+                continue
+            if self._openings(neighbour) >= 3:
                 continue
             if incoming_direction is not None:
                 angle_diff = self._angular_difference(incoming_direction, direction)
@@ -391,6 +401,11 @@ class Maze:
 
         direction, neighbour = candidates[-1][0]
         self._remove_wall(cell, neighbour, direction)
+
+    def _openings(self, cell: Cell) -> int:
+        """Return the number of open sides for ``cell``."""
+
+        return sum(1 for direction in self._directions if not cell.walls.get(direction, True))
 
     def _distance_to_goal(self, x: int, y: int) -> float:
         gx, gy = self._goal
