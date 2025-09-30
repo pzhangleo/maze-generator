@@ -6,7 +6,7 @@ from dataclasses import dataclass
 import math
 import random
 from collections import deque
-from typing import Deque, Dict, Iterable, Iterator, List, Optional, Sequence, Tuple
+from typing import Deque, Dict, Iterable, Iterator, List, Optional, Sequence, Set, Tuple
 
 Direction = str
 
@@ -34,6 +34,7 @@ class Maze:
         detour_bias: float = 0.0,
         turn_bias: float = 0.35,
         max_straight: int = 3,
+        hairpin_chance: float = 0.25,
     ) -> None:
         if width <= 1 or height <= 1:
             raise ValueError("Maze dimensions must be greater than 1x1")
@@ -47,6 +48,7 @@ class Maze:
         self.detour_bias = max(0.0, min(1.0, detour_bias))
         self.turn_bias = max(0.0, min(0.95, turn_bias))
         self.max_straight = max(0, max_straight)
+        self.hairpin_chance = max(0.0, min(1.0, hairpin_chance))
 
         if cell_shape == "square":
             self._directions: Tuple[Direction, ...] = ("N", "S", "E", "W")
@@ -55,6 +57,12 @@ class Maze:
                 "S": "N",
                 "E": "W",
                 "W": "E",
+            }
+            self._direction_angles: Dict[Direction, float] = {
+                "N": 0.0,
+                "E": 90.0,
+                "S": 180.0,
+                "W": 270.0,
             }
         elif cell_shape == "hex":
             self._directions = ("NE", "E", "SE", "SW", "W", "NW")
@@ -81,6 +89,14 @@ class Maze:
                 "SW": (3, 4),
                 "W": (4, 5),
                 "NW": (5, 0),
+            }
+            self._direction_angles = {
+                "NE": 0.0,
+                "E": 60.0,
+                "SE": 120.0,
+                "SW": 180.0,
+                "W": 240.0,
+                "NW": 300.0,
             }
         else:
             raise ValueError("cell_shape must be either 'square' or 'hex'")
@@ -175,6 +191,12 @@ class Maze:
                     self._straight_run.get((x, y), 0),
                 )
                 self._remove_wall(current, next_cell, direction)
+                self._maybe_carve_extra_turn(
+                    current,
+                    self._entry_direction.get((x, y)),
+                    visited,
+                    blocked={(next_cell.x, next_cell.y)},
+                )
                 active.append(next_cell)
                 visited.add((next_cell.x, next_cell.y))
                 previous_direction = self._entry_direction.get((x, y))
@@ -184,6 +206,12 @@ class Maze:
                     straight_length = 1
                 self._entry_direction[(next_cell.x, next_cell.y)] = direction
                 self._straight_run[(next_cell.x, next_cell.y)] = straight_length
+                self._maybe_carve_extra_turn(
+                    next_cell,
+                    direction,
+                    visited,
+                    blocked={(current.x, current.y)},
+                )
             else:
                 active.pop(index)
 
@@ -212,15 +240,20 @@ class Maze:
         for option in options:
             direction, _ = option
             weight = 1.0
-            if previous_direction is not None and direction == previous_direction:
+            if previous_direction is None:
+                weight *= 1.0
+            elif direction == previous_direction:
                 if self.max_straight > 0 and straight_run >= self.max_straight:
                     # 直线过长时强制尝试转向
                     continue
-                # 同方向继续前进时降低权重，让迷宫避免长直线
-                weight *= 1.0 - self.turn_bias
+                penalty = 1.0 - self.turn_bias
+                if straight_run > 1:
+                    penalty -= min(0.3, 0.1 * (straight_run - 1))
+                weight *= max(0.05, penalty)
             else:
-                # 转弯时适度提高权重，鼓励路径产生折线
-                weight *= 1.0 + self.turn_bias
+                angle_bonus = self._angular_difference(previous_direction, direction)
+                weight *= 1.0 + self.turn_bias + (angle_bonus / 180.0) * self.turn_bias
+            weight *= self.random.uniform(0.8, 1.2)
             if weight > 0.0:
                 directionally_weighted.append((option, weight))
 
@@ -292,6 +325,72 @@ class Maze:
                 return option
 
         return weighted_options[-1][1]
+
+    def _angular_difference(self, direction_a: Direction, direction_b: Direction) -> float:
+        angle_a = self._direction_angles.get(direction_a)
+        angle_b = self._direction_angles.get(direction_b)
+        if angle_a is None or angle_b is None:
+            return 0.0
+        diff = abs(angle_a - angle_b) % 360.0
+        return diff if diff <= 180.0 else 360.0 - diff
+
+    def _coordinate_in_direction(
+        self, x: int, y: int, direction: Direction
+    ) -> Optional[Tuple[int, int]]:
+        for neighbour_direction, neighbour in self.neighbours(x, y):
+            if neighbour_direction == direction:
+                return neighbour.x, neighbour.y
+        return None
+
+    def _maybe_carve_extra_turn(
+        self,
+        cell: Cell,
+        incoming_direction: Optional[Direction],
+        visited: Set[Tuple[int, int]],
+        blocked: Optional[Set[Tuple[int, int]]] = None,
+    ) -> None:
+        if self.hairpin_chance <= 0.0:
+            return
+        if self.random.random() > self.hairpin_chance:
+            return
+
+        blocked_coords: Set[Tuple[int, int]] = set(blocked or set())
+        parent_coord: Optional[Tuple[int, int]] = None
+        if incoming_direction is not None:
+            parent_direction = self._opposites[incoming_direction]
+            parent_coord = self._coordinate_in_direction(cell.x, cell.y, parent_direction)
+
+        candidates: List[Tuple[Tuple[Direction, Cell], float]] = []
+        for direction, neighbour in self.neighbours(cell.x, cell.y):
+            coord = (neighbour.x, neighbour.y)
+            if coord not in visited:
+                continue
+            if coord == parent_coord or coord in blocked_coords:
+                continue
+            if not cell.walls.get(direction, True):
+                continue
+            if incoming_direction is not None:
+                angle_diff = self._angular_difference(incoming_direction, direction)
+                weight = 0.5 + (angle_diff / 180.0) * 1.5
+            else:
+                weight = 1.0
+            weight *= self.random.uniform(0.85, 1.15)
+            candidates.append(((direction, neighbour), weight))
+
+        if not candidates:
+            return
+
+        total_weight = sum(weight for _, weight in candidates)
+        pick = self.random.random() * total_weight
+        cumulative = 0.0
+        for (direction, neighbour), weight in candidates:
+            cumulative += weight
+            if pick <= cumulative:
+                self._remove_wall(cell, neighbour, direction)
+                return
+
+        direction, neighbour = candidates[-1][0]
+        self._remove_wall(cell, neighbour, direction)
 
     def _distance_to_goal(self, x: int, y: int) -> float:
         gx, gy = self._goal
