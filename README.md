@@ -8,6 +8,7 @@
 - 提供 `classic`、`blueprint`、`night` 三种渲染样式。
 - 可生成 ASCII 预览、SVG 预览图以及包含迷宫与解答的 PDF。
 - 支持通过随机种子复现同一迷宫。
+- 迷宫格子可选择 `square` 或 `hex`，用于创建方形或六边形迷宫。
 
 ## 安装依赖
 
@@ -27,9 +28,10 @@ python -m maze_generator.cli export-pdf [参数]
 
 常用参数：
 
-- `--difficulty {easy,medium,hard}`：选择难度，默认 `medium`。
+- `--difficulty {easy,medium,hard}`：选择难度，默认 `medium`。难度会根据迷宫格子总数动态调整墙体循环密度，因此自定义的尺寸会自动匹配合适的复杂度。
 - `--width --height`：自定义迷宫尺寸，覆盖难度默认尺寸。
 - `--style {classic,blueprint,night}`：选择渲染样式。
+- `--cell-shape {square,hex}`：选择迷宫格子形状，默认为 `square`。
 - `--seed`：设置随机种子以便复现。
 
 ### 生成 ASCII 预览
