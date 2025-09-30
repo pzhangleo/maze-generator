@@ -51,6 +51,16 @@ python -m maze_generator.cli generate --width 40 --height 24 --seed 99
 
 同样的尺寸参数也适用于 `preview` 与 `export-pdf` 子命令，可组合 `--style`、`--cell-shape` 等选项一起使用。
 
+### 切换迷宫格子形状
+
+迷宫同时支持方格与六边形拓扑。可以通过 `--cell-shape` 在命令行中切换：
+
+```bash
+python -m maze_generator.cli preview --cell-shape hex --style night --output previews
+```
+
+上面的命令会生成六边形迷宫的 SVG 预览与解答图。同样的参数也适用于 `generate`（ASCII）与 `export-pdf`。当选择 `hex` 时，ASCII 输出会使用适配六边形的字符排布，而 PDF 与 SVG 则采用相应的六边形几何布局。
+
 ### 生成 ASCII 预览
 
 ```bash
