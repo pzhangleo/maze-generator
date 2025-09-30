@@ -369,6 +369,7 @@ class Maze:
             parent_coord = self._coordinate_in_direction(cell.x, cell.y, parent_direction)
 
         candidates: List[Tuple[Tuple[Direction, Cell], float]] = []
+        cell_openings = self._openings(cell)
         for direction, neighbour in self.neighbours(cell.x, cell.y):
             coord = (neighbour.x, neighbour.y)
             if coord not in visited:
@@ -377,7 +378,15 @@ class Maze:
                 continue
             if not cell.walls.get(direction, True):
                 continue
-            if self._openings(neighbour) >= 3:
+            neighbour_openings = self._openings(neighbour)
+            if neighbour_openings >= 3:
+                continue
+            # To keep individual cells well bounded we only consider adding a
+            # hairpin when both the current cell and the candidate neighbour
+            # are still narrow corridors (no more than a single open side so
+            # far). This stops the extra turn mechanism from merging multiple
+            # side rooms into large empty spaces.
+            if cell_openings > 1 or neighbour_openings > 1:
                 continue
             if incoming_direction is not None:
                 angle_diff = self._angular_difference(incoming_direction, direction)
