@@ -31,6 +31,7 @@ class Maze:
         loop_factor: float = 0.0,
         branching_chance: float = 0.35,
         cell_shape: str = "square",
+        detour_bias: float = 0.0,
     ) -> None:
         if width <= 1 or height <= 1:
             raise ValueError("Maze dimensions must be greater than 1x1")
@@ -41,6 +42,7 @@ class Maze:
         self.loop_factor = max(0.0, min(1.0, loop_factor))
         self.cell_shape = cell_shape
         self.branching_chance = max(0.0, min(1.0, branching_chance))
+        self.detour_bias = max(0.0, min(1.0, detour_bias))
 
         if cell_shape == "square":
             self._directions: Tuple[Direction, ...] = ("N", "S", "E", "W")
@@ -83,6 +85,12 @@ class Maze:
             [Cell(x, y, {direction: True for direction in self._directions}) for x in range(width)]
             for y in range(height)
         ]
+
+        self._goal = (self.width - 1, self.height - 1)
+        if cell_shape == "hex":
+            self._goal_axial = self._hex_offset_to_axial(*self._goal)
+        else:
+            self._goal_axial = None
 
         if cell_shape == "square":
             self._layout_origin = (0.0, 0.0)
@@ -129,6 +137,7 @@ class Maze:
         active: List[Cell] = []
         start = self.cell(0, 0)
         visited = {(0, 0)}
+        total_cells = self.width * self.height
         active.append(start)
 
         while active:
@@ -148,7 +157,9 @@ class Maze:
             ]
 
             if unvisited_neighbors:
-                direction, next_cell = self.random.choice(unvisited_neighbors)
+                direction, next_cell = self._select_next_cell(
+                    unvisited_neighbors, len(visited), total_cells
+                )
                 self._remove_wall(current, next_cell, direction)
                 active.append(next_cell)
                 visited.add((next_cell.x, next_cell.y))
@@ -164,6 +175,60 @@ class Maze:
         else:
             self.cell(0, 0).walls["W"] = False
             self.cell(self.width - 1, self.height - 1).walls["E"] = False
+
+    def _select_next_cell(
+        self,
+        options: Sequence[Tuple[Direction, Cell]],
+        visited_count: int,
+        total_cells: int,
+    ) -> Tuple[Direction, Cell]:
+        if not options:
+            raise ValueError("_select_next_cell requires at least one option")
+
+        if self.detour_bias <= 0.0:
+            return self.random.choice(options)
+
+        progress = visited_count / float(total_cells)
+        bias_strength = self.detour_bias * max(0.0, 1.0 - progress)
+        if bias_strength <= 0.0:
+            return self.random.choice(options)
+
+        distances = [self._distance_to_goal(cell.x, cell.y) for _, cell in options]
+        max_distance = max(distances)
+        min_distance = min(distances)
+
+        if math.isclose(max_distance, min_distance):
+            return self.random.choice(options)
+
+        weighted_options: List[Tuple[float, Tuple[Direction, Cell]]] = []
+        for option, distance in zip(options, distances):
+            weight = 1.0 + bias_strength * (distance - min_distance)
+            weighted_options.append((max(weight, 0.0), option))
+
+        total_weight = sum(weight for weight, _ in weighted_options)
+        if total_weight <= 0.0:
+            return self.random.choice(options)
+
+        pick = self.random.random() * total_weight
+        cumulative = 0.0
+        for weight, option in weighted_options:
+            cumulative += weight
+            if pick <= cumulative:
+                return option
+
+        return weighted_options[-1][1]
+
+    def _distance_to_goal(self, x: int, y: int) -> float:
+        gx, gy = self._goal
+        if self.cell_shape == "square":
+            return abs(gx - x) + abs(gy - y)
+
+        if self._goal_axial is None:
+            return abs(gx - x) + abs(gy - y)
+
+        q1, r1 = self._hex_offset_to_axial(x, y)
+        q2, r2 = self._goal_axial
+        return max(abs(q1 - q2), abs(r1 - r2), abs((-q1 - r1) - (-q2 - r2)))
 
     def _add_loops(self) -> None:
         """Optionally remove additional walls to increase complexity."""
@@ -421,6 +486,7 @@ def generate_maze(
             "height": 12,
             "loop_factor": 0.05,
             "branching_chance": 0.25,
+            "detour_bias": 0.25,
             "max_cells": 12 * 12,
         },
         "medium": {
@@ -428,6 +494,7 @@ def generate_maze(
             "height": 20,
             "loop_factor": 0.15,
             "branching_chance": 0.4,
+            "detour_bias": 0.45,
             "max_cells": 22 * 22,
         },
         "hard": {
@@ -435,6 +502,7 @@ def generate_maze(
             "height": 28,
             "loop_factor": 0.25,
             "branching_chance": 0.55,
+            "detour_bias": 0.6,
             "max_cells": None,
         },
     }
@@ -453,11 +521,14 @@ def generate_maze(
     # custom dimensions still produce an appropriate difficulty level.
     branching_chance = profile["branching_chance"]
 
+    detour_bias = profile["detour_bias"]
+
     for data in difficulty_profiles.values():
         max_cells = data["max_cells"]
         if max_cells is None or cell_count <= max_cells:
             loop_factor = data["loop_factor"]
             branching_chance = data["branching_chance"]
+            detour_bias = data["detour_bias"]
             break
     else:  # pragma: no cover - logically unreachable because "hard" has max_cells=None
         loop_factor = profile["loop_factor"]
@@ -469,6 +540,7 @@ def generate_maze(
         loop_factor=loop_factor,
         branching_chance=branching_chance,
         cell_shape=cell_shape,
+        detour_bias=detour_bias,
     )
     maze.generate()
     return maze
