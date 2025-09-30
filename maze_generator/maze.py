@@ -436,8 +436,28 @@ class Maze:
             if not neighbours:
                 continue
             direction, neighbour = self.random.choice(neighbours)
-            if cell.walls[direction]:
-                self._remove_wall(cell, neighbour, direction)
+            if not cell.walls.get(direction, True):
+                continue
+
+            # Avoid carving loops that join already open areas together. When both
+            # sides already have three or more exits, opening yet another wall
+            # turns the local structure into a wide room and results in the
+            # sparse appearance that users reported. Restrict the extra loops to
+            # corridors (cells with at most two exits) so that added cycles still
+            # feel like deliberate detours rather than empty spaces.
+            cell_openings = self._openings(cell)
+            neighbour_openings = self._openings(neighbour)
+            if cell_openings >= 3 or neighbour_openings >= 3:
+                continue
+
+            # Ensure that carving the wall will not immediately promote either
+            # cell into a four-way junction, which likewise produces large
+            # voids. This keeps the maze dense while still allowing controlled
+            # loops.
+            if cell_openings + 1 >= 4 or neighbour_openings + 1 >= 4:
+                continue
+
+            self._remove_wall(cell, neighbour, direction)
 
     def ascii_render(self, wall_char: str = "#", path_char: str = " ") -> str:
         """Return a simple ASCII representation of the maze."""
