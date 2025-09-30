@@ -29,6 +29,7 @@ class Maze:
         height: int,
         seed: Optional[int] = None,
         loop_factor: float = 0.0,
+        branching_chance: float = 0.35,
         cell_shape: str = "square",
     ) -> None:
         if width <= 1 or height <= 1:
@@ -39,6 +40,7 @@ class Maze:
         self.random = random.Random(seed)
         self.loop_factor = max(0.0, min(1.0, loop_factor))
         self.cell_shape = cell_shape
+        self.branching_chance = max(0.0, min(1.0, branching_chance))
 
         if cell_shape == "square":
             self._directions: Tuple[Direction, ...] = ("N", "S", "E", "W")
@@ -122,15 +124,22 @@ class Maze:
                 yield direction, self.cell(nx, ny)
 
     def generate(self) -> None:
-        """Generate the maze using a randomized depth-first search algorithm."""
+        """Generate the maze using a randomized growing-tree style algorithm."""
 
-        stack: List[Cell] = []
-        current = self.cell(0, 0)
+        active: List[Cell] = []
+        start = self.cell(0, 0)
         visited = {(0, 0)}
-        stack.append(current)
+        active.append(start)
 
-        while stack:
-            current = stack[-1]
+        while active:
+            if len(active) == 1:
+                index = 0
+            elif self.random.random() < self.branching_chance:
+                index = self.random.randrange(len(active))
+            else:
+                index = len(active) - 1
+
+            current = active[index]
             x, y = current.x, current.y
             unvisited_neighbors = [
                 (direction, neighbour)
@@ -141,10 +150,10 @@ class Maze:
             if unvisited_neighbors:
                 direction, next_cell = self.random.choice(unvisited_neighbors)
                 self._remove_wall(current, next_cell, direction)
-                stack.append(next_cell)
+                active.append(next_cell)
                 visited.add((next_cell.x, next_cell.y))
             else:
-                stack.pop()
+                active.pop(index)
 
         self._add_loops()
 
@@ -407,9 +416,27 @@ def generate_maze(
     """Factory function that creates and returns a generated maze."""
 
     difficulty_profiles = {
-        "easy": {"width": 12, "height": 12, "loop_factor": 0.05, "max_cells": 12 * 12},
-        "medium": {"width": 20, "height": 20, "loop_factor": 0.15, "max_cells": 22 * 22},
-        "hard": {"width": 28, "height": 28, "loop_factor": 0.25, "max_cells": None},
+        "easy": {
+            "width": 12,
+            "height": 12,
+            "loop_factor": 0.05,
+            "branching_chance": 0.25,
+            "max_cells": 12 * 12,
+        },
+        "medium": {
+            "width": 20,
+            "height": 20,
+            "loop_factor": 0.15,
+            "branching_chance": 0.4,
+            "max_cells": 22 * 22,
+        },
+        "hard": {
+            "width": 28,
+            "height": 28,
+            "loop_factor": 0.25,
+            "branching_chance": 0.55,
+            "max_cells": None,
+        },
     }
 
     profile = difficulty_profiles.get(difficulty)
@@ -424,10 +451,13 @@ def generate_maze(
     cell_count = maze_width * maze_height
     # Determine loop density dynamically based on the final maze size so that
     # custom dimensions still produce an appropriate difficulty level.
+    branching_chance = profile["branching_chance"]
+
     for data in difficulty_profiles.values():
         max_cells = data["max_cells"]
         if max_cells is None or cell_count <= max_cells:
             loop_factor = data["loop_factor"]
+            branching_chance = data["branching_chance"]
             break
     else:  # pragma: no cover - logically unreachable because "hard" has max_cells=None
         loop_factor = profile["loop_factor"]
@@ -437,6 +467,7 @@ def generate_maze(
         height=maze_height,
         seed=seed,
         loop_factor=loop_factor,
+        branching_chance=branching_chance,
         cell_shape=cell_shape,
     )
     maze.generate()
