@@ -128,6 +128,28 @@ class Maze:
         cell.walls[direction] = False
         neighbour.walls[opposite] = False
 
+    def _can_carve_connection(
+        self,
+        cell: Cell,
+        neighbour: Cell,
+        direction: Direction,
+        max_openings: int = 2,
+    ) -> bool:
+        """Return ``True`` when knocking down the wall keeps the maze tight."""
+
+        if not cell.walls.get(direction, True):
+            return False
+
+        opposite = self._opposites[direction]
+        neighbour_wall = neighbour.walls.get(opposite, True)
+        if not neighbour_wall:
+            return False
+
+        return (
+            self._openings(cell) < max_openings
+            and self._openings(neighbour) < max_openings
+        )
+
     def _neighbour_coords(self, x: int, y: int) -> Iterator[Tuple[Direction, Tuple[int, int]]]:
         if self.cell_shape == "square":
             deltas: Sequence[Tuple[Direction, Tuple[int, int]]] = (
@@ -396,11 +418,13 @@ class Maze:
         for (direction, neighbour), weight in candidates:
             cumulative += weight
             if pick <= cumulative:
-                self._remove_wall(cell, neighbour, direction)
+                if self._can_carve_connection(cell, neighbour, direction):
+                    self._remove_wall(cell, neighbour, direction)
                 return
 
         direction, neighbour = candidates[-1][0]
-        self._remove_wall(cell, neighbour, direction)
+        if self._can_carve_connection(cell, neighbour, direction):
+            self._remove_wall(cell, neighbour, direction)
 
     def _openings(self, cell: Cell) -> int:
         """Return the number of open sides for ``cell``."""
@@ -436,7 +460,7 @@ class Maze:
             if not neighbours:
                 continue
             direction, neighbour = self.random.choice(neighbours)
-            if cell.walls[direction]:
+            if cell.walls[direction] and self._can_carve_connection(cell, neighbour, direction):
                 self._remove_wall(cell, neighbour, direction)
 
     def ascii_render(self, wall_char: str = "#", path_char: str = " ") -> str:
