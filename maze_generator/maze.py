@@ -35,6 +35,8 @@ class Maze:
         turn_bias: float = 0.35,
         max_straight: int = 3,
         hairpin_chance: float = 0.25,
+        coverage_bias: float = 0.45,
+        sweeping_turn_min_radius: int = 6,
     ) -> None:
         if width <= 1 or height <= 1:
             raise ValueError("Maze dimensions must be greater than 1x1")
@@ -47,7 +49,9 @@ class Maze:
         self.branching_chance = max(0.0, min(1.0, branching_chance))
         self.detour_bias = max(0.0, min(1.0, detour_bias))
         self.turn_bias = max(0.0, min(0.95, turn_bias))
-        self.max_straight = max(0, max_straight)
+        self.coverage_bias = max(0.0, min(1.0, coverage_bias))
+        self.sweeping_turn_min_radius = max(0, sweeping_turn_min_radius)
+        self.max_straight = max(0, max(max_straight, self.sweeping_turn_min_radius))
         self.hairpin_chance = max(0.0, min(1.0, hairpin_chance))
 
         if cell_shape == "square":
@@ -211,6 +215,7 @@ class Maze:
                     total_cells,
                     self._entry_direction.get((x, y)),
                     self._straight_run.get((x, y), 0),
+                    visited,
                 )
                 self._remove_wall(current, next_cell, direction)
                 self._maybe_carve_extra_turn(
@@ -254,28 +259,43 @@ class Maze:
         total_cells: int,
         previous_direction: Optional[Direction],
         straight_run: int,
+        visited: Set[Tuple[int, int]],
     ) -> Tuple[Direction, Cell]:
         if not options:
             raise ValueError("_select_next_cell requires at least one option")
 
         directionally_weighted: List[Tuple[Tuple[Direction, Cell], float]] = []
         for option in options:
-            direction, _ = option
+            direction, candidate = option
             weight = 1.0
-            if previous_direction is None:
-                weight *= 1.0
-            elif direction == previous_direction:
-                if self.max_straight > 0 and straight_run >= self.max_straight:
-                    # 直线过长时强制尝试转向
-                    continue
-                penalty = 1.0 - self.turn_bias
-                if straight_run > 1:
-                    penalty -= min(0.3, 0.1 * (straight_run - 1))
-                weight *= max(0.05, penalty)
-            else:
-                angle_bonus = self._angular_difference(previous_direction, direction)
-                weight *= 1.0 + self.turn_bias + (angle_bonus / 180.0) * self.turn_bias
+            if previous_direction is not None:
+                is_same_direction = direction == previous_direction
+                opposite_direction = self._opposites.get(previous_direction)
+                is_opposite_direction = direction == opposite_direction
+                if is_same_direction:
+                    if self.max_straight > 0 and straight_run >= self.max_straight:
+                        # 直线过长时强制尝试转向
+                        continue
+                    penalty = 1.0 - self.turn_bias
+                    if straight_run > 1:
+                        penalty -= min(0.3, 0.1 * (straight_run - 1))
+                    weight *= max(0.05, penalty)
+                else:
+                    angle_bonus = self._angular_difference(previous_direction, direction)
+                    turn_weight = 1.0 + self.turn_bias + (angle_bonus / 180.0) * self.turn_bias
+                    if is_opposite_direction:
+                        if self.sweeping_turn_min_radius > 0 and straight_run < self.sweeping_turn_min_radius:
+                            suppression = (straight_run + 1) / (self.sweeping_turn_min_radius + 1)
+                            turn_weight *= max(0.05, suppression * 0.25)
+                        else:
+                            extra = straight_run - self.sweeping_turn_min_radius
+                            radius_multiplier = 1.0 + max(0, extra + 1) * 0.6
+                            turn_weight *= radius_multiplier
+                    weight *= turn_weight
             weight *= self.random.uniform(0.8, 1.2)
+            if self.coverage_bias > 0.0:
+                unvisited_ratio = self._unvisited_ratio(candidate.x, candidate.y, visited)
+                weight *= 1.0 + self.coverage_bias * unvisited_ratio
             if weight > 0.0:
                 directionally_weighted.append((option, weight))
 
@@ -430,6 +450,17 @@ class Maze:
         """Return the number of open sides for ``cell``."""
 
         return sum(1 for direction in self._directions if not cell.walls.get(direction, True))
+
+    def _unvisited_ratio(self, x: int, y: int, visited: Set[Tuple[int, int]]) -> float:
+        total = 0
+        unvisited = 0
+        for _, neighbour in self.neighbours(x, y):
+            total += 1
+            if (neighbour.x, neighbour.y) not in visited:
+                unvisited += 1
+        if total == 0:
+            return 0.0
+        return unvisited / float(total)
 
     def _distance_to_goal(self, x: int, y: int) -> float:
         gx, gy = self._goal

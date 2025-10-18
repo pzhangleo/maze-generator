@@ -10,6 +10,7 @@
 - 生成 ASCII 预览、SVG 预览图，以及包含迷宫和解答两页的 PDF。
 - 支持使用随机种子复现同一个迷宫。
 - 完全纯 Python 实现，无第三方依赖。
+- 改进的路径走向逻辑让解答路线覆盖更多区域，并可出现半径 6 格以上的大幅回转弯道。
 
 ## 安装依赖
 
@@ -155,6 +156,7 @@ svg_markup = render_maze_figure(maze, get_style("night"))
 - `generate_maze` 返回一个已经生成好的迷宫对象，可直接调用 `ascii_render()`、`solve()` 等方法。
 - `save_preview_images` 返回包含迷宫与解答 SVG 文件路径的结果对象，属性为 `figure_path` 与 `solution_path`，并允许通过 `prefix` 控制输出文件名前缀。
 - `export_maze_pdf` 生成两页 PDF，返回最终的 `Path` 对象；如需直接获取 SVG 字符串，可结合 `render_maze_figure` 与 `get_style()`。
+- `Maze` 构造函数提供 `coverage_bias` 与 `sweeping_turn_min_radius` 等参数，可调节路径的覆盖度与大回转弯触发阈值。
 
 ## 目录结构
 
