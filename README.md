@@ -95,6 +95,20 @@ python -m maze_generator.cli preview --difficulty hard --style blueprint --outpu
 命令执行后会在终端打印两个 SVG 文件的路径，方便脚本自动化处理或调试。
 
 
+
+### 测试图片（仓库内可直接查看）
+
+为避免临时构建产物链接失效，仓库中已提供一组固定的验证图片（SVG）：
+
+- `verification/maze_classic.svg`
+- `verification/maze_classic_solution.svg`
+
+可通过以下命令重新生成：
+
+```bash
+python -m maze_generator.cli preview --difficulty medium --seed 42 --style classic --output verification
+```
+
 ### 导出 PDF
 
 ```bash

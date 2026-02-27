@@ -284,32 +284,12 @@ class Maze:
             directionally_weighted = [(option, 1.0) for option in options]
 
         if self.detour_bias <= 0.0:
-            weights = [weight for _, weight in directionally_weighted]
-            total_weight = sum(weights)
-            if total_weight <= 0.0:
-                return self.random.choice([option for option, _ in directionally_weighted])
-            pick = self.random.random() * total_weight
-            cumulative = 0.0
-            for option, weight in directionally_weighted:
-                cumulative += weight
-                if pick <= cumulative:
-                    return option
-            return directionally_weighted[-1][0]
+            return self._weighted_choice(directionally_weighted)
 
         progress = visited_count / float(total_cells)
         bias_strength = self.detour_bias * max(0.0, 1.0 - progress)
         if bias_strength <= 0.0:
-            weights = [weight for _, weight in directionally_weighted]
-            total_weight = sum(weights)
-            if total_weight <= 0.0:
-                return self.random.choice([option for option, _ in directionally_weighted])
-            pick = self.random.random() * total_weight
-            cumulative = 0.0
-            for option, weight in directionally_weighted:
-                cumulative += weight
-                if pick <= cumulative:
-                    return option
-            return directionally_weighted[-1][0]
+            return self._weighted_choice(directionally_weighted)
 
         weighted_options: List[Tuple[float, Tuple[Direction, Cell]]] = []
         base_options = [option for option, _ in directionally_weighted]
@@ -320,33 +300,27 @@ class Maze:
         min_distance = min(distances)
 
         if math.isclose(max_distance, min_distance):
-            total_weight = sum(base_weights)
-            if total_weight <= 0.0:
-                return self.random.choice(base_options)
-            pick = self.random.random() * total_weight
-            cumulative = 0.0
-            for option, weight in zip(base_options, base_weights):
-                cumulative += weight
-                if pick <= cumulative:
-                    return option
-            return base_options[-1]
+            return self._weighted_choice(list(zip(base_options, base_weights)))
 
         for option, distance, direction_weight in zip(base_options, distances, base_weights):
             weight = direction_weight * (1.0 + bias_strength * (distance - min_distance))
             weighted_options.append((max(weight, 0.0), option))
 
-        total_weight = sum(weight for weight, _ in weighted_options)
+        weighted_pairs = [(option, weight) for weight, option in weighted_options]
+        return self._weighted_choice(weighted_pairs)
+
+    def _weighted_choice(self, options: Sequence[Tuple[Tuple[Direction, Cell], float]]) -> Tuple[Direction, Cell]:
+        total_weight = sum(weight for _, weight in options)
         if total_weight <= 0.0:
-            return self.random.choice(base_options)
+            return self.random.choice([option for option, _ in options])
 
         pick = self.random.random() * total_weight
         cumulative = 0.0
-        for weight, option in weighted_options:
+        for option, weight in options:
             cumulative += weight
             if pick <= cumulative:
                 return option
-
-        return weighted_options[-1][1]
+        return options[-1][0]
 
     def _angular_difference(self, direction_a: Direction, direction_b: Direction) -> float:
         angle_a = self._direction_angles.get(direction_a)
@@ -412,17 +386,7 @@ class Maze:
         if not candidates:
             return
 
-        total_weight = sum(weight for _, weight in candidates)
-        pick = self.random.random() * total_weight
-        cumulative = 0.0
-        for (direction, neighbour), weight in candidates:
-            cumulative += weight
-            if pick <= cumulative:
-                if self._can_carve_connection(cell, neighbour, direction):
-                    self._remove_wall(cell, neighbour, direction)
-                return
-
-        direction, neighbour = candidates[-1][0]
+        direction, neighbour = self._weighted_choice(candidates)
         if self._can_carve_connection(cell, neighbour, direction):
             self._remove_wall(cell, neighbour, direction)
 
