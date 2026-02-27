@@ -61,7 +61,7 @@ def render_maze_svg(maze: Maze, style: MazeStyle, show_solution: bool = False) -
     width = unit_width * CELL_SIZE + MARGIN * 2
     height = unit_height * CELL_SIZE + MARGIN * 2
     svg_parts = _svg_header(width, height, style.background_color)
-    svg_parts.extend(_svg_lines(list(maze.wall_segments()), style))
+    svg_parts.extend(_svg_lines(maze.wall_segments(), style))
     if show_solution:
         svg_parts.append(_svg_solution(maze.solve(), style, maze))
     svg_parts.extend(_svg_footer())
