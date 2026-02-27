@@ -1,0 +1,64 @@
+name: Generate Maze PDF
+
+on:
+  workflow_dispatch:
+    inputs:
+      width:
+        description: Maze width
+        required: false
+        default: "100"
+      height:
+        description: Maze height
+        required: false
+        default: "100"
+      difficulty:
+        description: Maze difficulty
+        required: false
+        default: "hard"
+      style:
+        description: Render style
+        required: false
+        default: "classic"
+      seed:
+        description: Optional random seed
+        required: false
+        default: ""
+
+jobs:
+  generate-pdf:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Generate maze PDF
+        shell: bash
+        run: |
+          mkdir -p output
+          SEED_ARGS=""
+          if [ -n "${{ github.event.inputs.seed }}" ]; then
+            SEED_ARGS="--seed ${{ github.event.inputs.seed }}"
+          fi
+
+          python -m maze_generator.cli export-pdf \
+            --difficulty "${{ github.event.inputs.difficulty || 'hard' }}" \
+            --width "${{ github.event.inputs.width || '100' }}" \
+            --height "${{ github.event.inputs.height || '100' }}" \
+            --style "${{ github.event.inputs.style || 'classic' }}" \
+            --pdf output/maze_${{ github.event.inputs.difficulty || 'hard' }}_${{ github.event.inputs.width || '100' }}x${{ github.event.inputs.height || '100' }}.pdf \
+            ${SEED_ARGS}
+
+      - name: Upload PDF artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: maze-pdf
+          path: output/*.pdf
