@@ -693,6 +693,24 @@ def generate_maze(
         },
     }
 
+    turn_profiles = {
+        "easy": {
+            "turn_bias": 0.6,
+            "max_straight": 3,
+            "hairpin_chance": 0.2,
+        },
+        "medium": {
+            "turn_bias": 0.68,
+            "max_straight": 2,
+            "hairpin_chance": 0.33,
+        },
+        "hard": {
+            "turn_bias": 0.76,
+            "max_straight": 1,
+            "hairpin_chance": 0.42,
+        },
+    }
+
     profile = difficulty_profiles.get(difficulty)
     if profile is None:
         raise ValueError(
@@ -708,9 +726,10 @@ def generate_maze(
     branching_chance = profile["branching_chance"]
 
     detour_bias = profile["detour_bias"]
-    turn_bias = profile["turn_bias"]
-    max_straight = profile["max_straight"]
-    hairpin_chance = profile["hairpin_chance"]
+    turn_profile = turn_profiles[difficulty]
+    turn_bias = turn_profile["turn_bias"]
+    max_straight = turn_profile["max_straight"]
+    hairpin_chance = turn_profile["hairpin_chance"]
 
     for data in difficulty_profiles.values():
         max_cells = data["max_cells"]
