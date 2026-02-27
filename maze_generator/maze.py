@@ -664,9 +664,6 @@ def generate_maze(
             "loop_factor": 0.05,
             "branching_chance": 0.25,
             "detour_bias": 0.25,
-            "turn_bias": 0.6,
-            "max_straight": 3,
-            "hairpin_chance": 0.2,
             "max_cells": 12 * 12,
         },
         "medium": {
@@ -675,9 +672,6 @@ def generate_maze(
             "loop_factor": 0.15,
             "branching_chance": 0.4,
             "detour_bias": 0.45,
-            "turn_bias": 0.68,
-            "max_straight": 2,
-            "hairpin_chance": 0.33,
             "max_cells": 22 * 22,
         },
         "hard": {
@@ -686,10 +680,25 @@ def generate_maze(
             "loop_factor": 0.25,
             "branching_chance": 0.55,
             "detour_bias": 0.6,
+            "max_cells": None,
+        },
+    }
+
+    turn_profiles = {
+        "easy": {
+            "turn_bias": 0.6,
+            "max_straight": 3,
+            "hairpin_chance": 0.2,
+        },
+        "medium": {
+            "turn_bias": 0.68,
+            "max_straight": 2,
+            "hairpin_chance": 0.33,
+        },
+        "hard": {
             "turn_bias": 0.76,
             "max_straight": 1,
             "hairpin_chance": 0.42,
-            "max_cells": None,
         },
     }
 
@@ -708,9 +717,10 @@ def generate_maze(
     branching_chance = profile["branching_chance"]
 
     detour_bias = profile["detour_bias"]
-    turn_bias = profile["turn_bias"]
-    max_straight = profile["max_straight"]
-    hairpin_chance = profile["hairpin_chance"]
+    turn_profile = turn_profiles[difficulty]
+    turn_bias = turn_profile["turn_bias"]
+    max_straight = turn_profile["max_straight"]
+    hairpin_chance = turn_profile["hairpin_chance"]
 
     for data in difficulty_profiles.values():
         max_cells = data["max_cells"]
@@ -718,9 +728,6 @@ def generate_maze(
             loop_factor = data["loop_factor"]
             branching_chance = data["branching_chance"]
             detour_bias = data["detour_bias"]
-            turn_bias = data["turn_bias"]
-            max_straight = data["max_straight"]
-            hairpin_chance = data["hairpin_chance"]
             break
     else:  # pragma: no cover - logically unreachable because "hard" has max_cells=None
         loop_factor = profile["loop_factor"]
