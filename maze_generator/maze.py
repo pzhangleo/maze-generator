@@ -614,37 +614,90 @@ class Maze:
                 iy1 += sy
 
     def solve(self) -> List[Tuple[int, int]]:
-        """Find the shortest path from the top-left to the bottom-right cell."""
+        """Find a shortest path while preferring turns over long straight runs."""
 
         start = (0, 0)
         goal = (self.width - 1, self.height - 1)
-        queue: Deque[Tuple[int, int]] = deque([start])
-        came_from: Dict[Tuple[int, int], Optional[Tuple[int, int]]] = {start: None}
+
+        # Phase 1: reverse BFS from goal to compute shortest distance-to-goal
+        # for every reachable cell.
+        queue: Deque[Tuple[int, int]] = deque([goal])
+        dist_to_goal: Dict[Tuple[int, int], int] = {goal: 0}
 
         while queue:
             current = queue.popleft()
-            if current == goal:
-                break
             x, y = current
+            current_dist = dist_to_goal[current]
             cell = self.cell(x, y)
             for direction, (nx, ny) in self._neighbour_coords(x, y):
+                if not (0 <= nx < self.width and 0 <= ny < self.height):
+                    continue
                 if cell.walls.get(direction, True):
                     continue
                 next_coord = (nx, ny)
-                if next_coord not in came_from and 0 <= nx < self.width and 0 <= ny < self.height:
-                    queue.append(next_coord)
-                    came_from[next_coord] = current
+                if next_coord in dist_to_goal:
+                    continue
+                dist_to_goal[next_coord] = current_dist + 1
+                queue.append(next_coord)
 
-        if goal not in came_from:
+        if start not in dist_to_goal:
             raise RuntimeError("Maze has no solution")
 
-        # Reconstruct path
-        path: List[Tuple[int, int]] = []
-        current: Optional[Tuple[int, int]] = goal
-        while current is not None:
-            path.append(current)
-            current = came_from[current]
-        path.reverse()
+        # Phase 2: walk from start to goal only through shortest-path edges
+        # and prefer larger direction changes to avoid long straight segments.
+        path: List[Tuple[int, int]] = [start]
+        current = start
+        previous_direction: Optional[Direction] = None
+
+        while current != goal:
+            x, y = current
+            cell = self.cell(x, y)
+            current_dist = dist_to_goal[current]
+
+            candidates: List[Tuple[Direction, Tuple[int, int]]] = []
+            for direction, (nx, ny) in self._neighbour_coords(x, y):
+                if not (0 <= nx < self.width and 0 <= ny < self.height):
+                    continue
+                if cell.walls.get(direction, True):
+                    continue
+                next_coord = (nx, ny)
+                if dist_to_goal.get(next_coord) == current_dist - 1:
+                    candidates.append((direction, next_coord))
+
+            if not candidates:
+                raise RuntimeError("Maze has no solution")
+
+            if previous_direction is None:
+                # First step: deterministic tie-break by larger remaining distance
+                # from the next cell to start-ish frontier (more meander potential).
+                chosen_direction, chosen_coord = max(
+                    candidates,
+                    key=lambda item: (
+                        len(
+                            [
+                                1
+                                for d, (nx, ny) in self._neighbour_coords(item[1][0], item[1][1])
+                                if 0 <= nx < self.width
+                                and 0 <= ny < self.height
+                                and not self.cell(item[1][0], item[1][1]).walls.get(d, True)
+                            ]
+                        ),
+                        item[0],
+                    ),
+                )
+            else:
+                chosen_direction, chosen_coord = max(
+                    candidates,
+                    key=lambda item: (
+                        self._angular_difference(previous_direction, item[0]),
+                        item[0],
+                    ),
+                )
+
+            path.append(chosen_coord)
+            current = chosen_coord
+            previous_direction = chosen_direction
+
         return path
 
 
