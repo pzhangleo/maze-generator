@@ -1,5 +1,7 @@
 # Maze Generator
 
+[![CI](https://github.com/pzhangleo/maze-generator/actions/workflows/ci.yml/badge.svg)](https://github.com/pzhangleo/maze-generator/actions/workflows/ci.yml)
+
 这个项目提供一个命令行迷宫生成器，可以自定义迷宫难度、样式并生成迷宫的预览图和带解答的 PDF。同时也可以作为一个 Python 包引入，在代码中直接生成迷宫、渲染 SVG 或导出 PDF。
 
 ## 特性
@@ -184,11 +186,25 @@ svg_markup = render_maze_figure(maze, get_style("night"))
 - `save_preview_images` 返回包含迷宫与解答 SVG 文件路径的结果对象，属性为 `figure_path` 与 `solution_path`，并允许通过 `prefix` 控制输出文件名前缀。
 - `export_maze_pdf` 生成两页 PDF，返回最终的 `Path` 对象；如需直接获取 SVG 字符串，可结合 `render_maze_figure` 与 `get_style()`。
 
+## 测试
+
+项目本身零第三方依赖，测试使用 `pytest`：
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest tests -q
+```
+
+测试覆盖连通性、解答合法性（不穿墙、不重复经过格子）、同种子可复现、出入口开放，以及解答路径的蜿蜒程度；`tests/test_maze.py` 里的 `test_solution_is_winding_not_a_straight_run` 就是防止答案退化成一条斜线的回归用例。
+
+CI 在 `.github/workflows/ci.yml`：每次 push 到 `main` 或提交 PR 时跑测试（Python 3.9 / 3.12）并做一遍命令行冒烟验证。
+
 ## 目录结构
 
 - `maze_generator/maze.py`：迷宫生成逻辑、求解与 ASCII 渲染。
 - `maze_generator/render.py`：SVG 渲染与 PDF 导出实现。
 - `maze_generator/cli.py`：命令行接口及参数解析。
 - `maze_generator/styles.py`：预设的渲染样式配置。
+- `tests/test_maze.py`：pytest 测试用例。
 
 欢迎根据需要扩展更多难度配置或渲染主题！
