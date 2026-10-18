@@ -21,6 +21,12 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     common.add_argument("--width", type=int, default=None, help="Custom maze width (overrides difficulty preset)")
     common.add_argument("--height", type=int, default=None, help="Custom maze height (overrides difficulty preset)")
     common.add_argument("--seed", type=int, default=None, help="Random seed for reproducible mazes")
+    common.add_argument(
+        "--winding",
+        type=float,
+        default=None,
+        help="How twisty the solution is, 0..1 (default: derived from difficulty)",
+    )
     common.add_argument("--style", default="classic", choices=list(STYLES.keys()), help="Visual style for rendering")
     common.add_argument(
         "--cell-shape",
@@ -50,6 +56,7 @@ def _create_maze(args: argparse.Namespace):
         height=args.height,
         seed=args.seed,
         cell_shape=args.cell_shape,
+        winding=args.winding,
     )
 
 
