@@ -1,5 +1,7 @@
 # Maze Generator
 
+[![CI](https://github.com/pzhangleo/maze-generator/actions/workflows/ci.yml/badge.svg)](https://github.com/pzhangleo/maze-generator/actions/workflows/ci.yml)
+
 这个项目提供一个命令行迷宫生成器，可以自定义迷宫难度、样式并生成迷宫的预览图和带解答的 PDF。同时也可以作为一个 Python 包引入，在代码中直接生成迷宫、渲染 SVG 或导出 PDF。
 
 ## 特性
@@ -7,6 +9,7 @@
 - 支持 `easy`、`medium`、`hard` 三种难度，或通过自定义宽高生成任意尺寸的迷宫。
 - 内置 `classic`、`blueprint`、`night` 三种渲染样式，可扩展自定义主题。
 - 支持 `square` 与 `hex` 两种格子形状，对应方形和六边形迷宫。
+- 解答路径会主动拉长成蜿蜒绕行的形态，不会出现「一条斜线穿过迷宫」的答案。
 - 生成 ASCII 预览、SVG 预览图，以及包含迷宫和解答两页的 PDF。
 - 支持使用随机种子复现同一个迷宫。
 - 完全纯 Python 实现，无第三方依赖。
@@ -44,8 +47,21 @@ python -m maze_generator.cli export-pdf [参数]
 - `--difficulty {easy,medium,hard}`：选择难度，默认 `medium`。难度会根据最终的迷宫格子数量自动调整循环密度，因此自定义尺寸也能得到合适复杂度。
 - `--width --height`：自定义迷宫宽和高，传入任意正整数（大于 1）。如果指定则覆盖难度默认尺寸。
 - `--seed`：设置随机种子以便复现。
+- `--winding`：解答路径的蜿蜒程度，取值 `0`–`1`。`0` 表示保留最短的通路，`1` 表示尽可能让答案绕遍整个迷宫；不指定时由难度决定（easy `0.4`、medium `0.65`、hard `0.95`）。
 - `--style {classic,blueprint,night}`：选择渲染样式（对 `preview`、`export-pdf` 两个子命令生效）。
 - `--cell-shape {square,hex}`：选择迷宫格子形状，默认为 `square`。
+
+### 控制解答路径的蜿蜒程度
+
+```bash
+python -m maze_generator.cli preview --difficulty hard --winding 0.8 --seed 7
+```
+
+`--winding 0` 时答案就是迷宫里的最短通路（往往近似一条斜线）；调高后会要求答案绕行更远，`1` 相当于让解答尽可能穿过更多区域。难度预设已经给了合适的默认值，一般无需手动指定。
+
+### 解答路径是怎么被拉长的
+
+生成阶段先刻出一棵生成树，再对解答路径做局部重连：随机切断路径上的一条边，把裂开的两半通过一堵更远的墙重新接上。这样答案就必须先深入一半、再从另一半绕出来，而迷宫依然是连通的生成树。最后加环路时只允许「挂在解答路径同一个节点上的死胡同内部成环」，因此环路不会变成抄近路的捷径，答案也不会被重新拉直。
 
 ### 自定义宽高
 
@@ -170,11 +186,25 @@ svg_markup = render_maze_figure(maze, get_style("night"))
 - `save_preview_images` 返回包含迷宫与解答 SVG 文件路径的结果对象，属性为 `figure_path` 与 `solution_path`，并允许通过 `prefix` 控制输出文件名前缀。
 - `export_maze_pdf` 生成两页 PDF，返回最终的 `Path` 对象；如需直接获取 SVG 字符串，可结合 `render_maze_figure` 与 `get_style()`。
 
+## 测试
+
+项目本身零第三方依赖，测试使用 `pytest`：
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest tests -q
+```
+
+测试覆盖连通性、解答合法性（不穿墙、不重复经过格子）、同种子可复现、出入口开放，以及解答路径的蜿蜒程度；`tests/test_maze.py` 里的 `test_solution_is_winding_not_a_straight_run` 就是防止答案退化成一条斜线的回归用例。
+
+CI 在 `.github/workflows/ci.yml`：每次 push 到 `main` 或提交 PR 时跑测试（Python 3.9 / 3.12）并做一遍命令行冒烟验证。
+
 ## 目录结构
 
 - `maze_generator/maze.py`：迷宫生成逻辑、求解与 ASCII 渲染。
 - `maze_generator/render.py`：SVG 渲染与 PDF 导出实现。
 - `maze_generator/cli.py`：命令行接口及参数解析。
 - `maze_generator/styles.py`：预设的渲染样式配置。
+- `tests/test_maze.py`：pytest 测试用例。
 
 欢迎根据需要扩展更多难度配置或渲染主题！

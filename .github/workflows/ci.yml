@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.12"]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install test dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Run tests
+        run: python -m pytest tests -q
+
+  cli:
+    name: cli smoke
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Generate ASCII mazes
+        run: |
+          python -m maze_generator.cli generate --difficulty easy --seed 1
+          python -m maze_generator.cli generate --cell-shape hex --width 12 --height 8 --seed 1
+
+      - name: Generate SVG previews
+        run: |
+          python -m maze_generator.cli preview \
+            --difficulty medium --seed 2 --style blueprint --output build/previews
+
+      - name: Export a PDF
+        run: |
+          python -m maze_generator.cli export-pdf \
+            --difficulty hard --width 30 --height 20 --seed 3 \
+            --style night --pdf build/maze.pdf --title "CI"
+
+      - name: Check the artifacts
+        run: |
+          test -s build/previews/maze_blueprint.svg
+          test -s build/previews/maze_blueprint_solution.svg
+          grep -q polyline build/previews/maze_blueprint_solution.svg
+          head -c 5 build/maze.pdf | grep -q '%PDF'

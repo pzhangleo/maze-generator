@@ -6,7 +6,7 @@ from dataclasses import dataclass
 import math
 import random
 from collections import deque
-from typing import Deque, Dict, Iterable, Iterator, List, Optional, Sequence, Set, Tuple
+from typing import Deque, Dict, Iterable, Iterator, List, Optional, Sequence, Tuple
 
 Direction = str
 
@@ -35,6 +35,7 @@ class Maze:
         turn_bias: float = 0.35,
         max_straight: int = 3,
         hairpin_chance: float = 0.25,
+        winding: float = 0.6,
     ) -> None:
         if width <= 1 or height <= 1:
             raise ValueError("Maze dimensions must be greater than 1x1")
@@ -49,6 +50,7 @@ class Maze:
         self.turn_bias = max(0.0, min(0.95, turn_bias))
         self.max_straight = max(0, max_straight)
         self.hairpin_chance = max(0.0, min(1.0, hairpin_chance))
+        self.winding = max(0.0, min(1.0, winding))
 
         if cell_shape == "square":
             self._directions: Tuple[Direction, ...] = ("N", "S", "E", "W")
@@ -128,28 +130,6 @@ class Maze:
         cell.walls[direction] = False
         neighbour.walls[opposite] = False
 
-    def _can_carve_connection(
-        self,
-        cell: Cell,
-        neighbour: Cell,
-        direction: Direction,
-        max_openings: int = 2,
-    ) -> bool:
-        """Return ``True`` when knocking down the wall keeps the maze tight."""
-
-        if not cell.walls.get(direction, True):
-            return False
-
-        opposite = self._opposites[direction]
-        neighbour_wall = neighbour.walls.get(opposite, True)
-        if not neighbour_wall:
-            return False
-
-        return (
-            self._openings(cell) < max_openings
-            and self._openings(neighbour) < max_openings
-        )
-
     def _neighbour_coords(self, x: int, y: int) -> Iterator[Tuple[Direction, Tuple[int, int]]]:
         if self.cell_shape == "square":
             deltas: Sequence[Tuple[Direction, Tuple[int, int]]] = (
@@ -178,7 +158,31 @@ class Maze:
                 yield direction, self.cell(nx, ny)
 
     def generate(self) -> None:
-        """Generate the maze using a randomized growing-tree style algorithm."""
+        """Generate the maze in three passes.
+
+        1. Carve a spanning tree with the randomized growing-tree algorithm.
+        2. Stretch the start-to-goal route so the answer winds through the maze
+           instead of cutting across it in a near-straight diagonal.
+        3. Braid dead ends with loops that cannot shortcut that route.
+        """
+
+        self._carve_spanning_tree()
+        # 生成本身只会保证「连通」，起点到终点的通路仍然可能几乎是条直线。
+        # 这里在保持生成树结构的前提下重连分支，把解答路径拉长成蜿蜒形态。
+        if self.winding > 0.0:
+            self._elongate_solution()
+        self._add_loops()
+
+        # Open an entrance and an exit for clarity when rendering
+        if self.cell_shape == "square":
+            self.cell(0, 0).walls["N"] = False
+            self.cell(self.width - 1, self.height - 1).walls["S"] = False
+        else:
+            self.cell(0, 0).walls["W"] = False
+            self.cell(self.width - 1, self.height - 1).walls["E"] = False
+
+    def _carve_spanning_tree(self) -> None:
+        """Carve a spanning tree with the randomized growing-tree algorithm."""
 
         active: List[Cell] = []
         start = self.cell(0, 0)
@@ -213,12 +217,6 @@ class Maze:
                     self._straight_run.get((x, y), 0),
                 )
                 self._remove_wall(current, next_cell, direction)
-                self._maybe_carve_extra_turn(
-                    current,
-                    self._entry_direction.get((x, y)),
-                    visited,
-                    blocked={(next_cell.x, next_cell.y)},
-                )
                 active.append(next_cell)
                 visited.add((next_cell.x, next_cell.y))
                 previous_direction = self._entry_direction.get((x, y))
@@ -228,24 +226,8 @@ class Maze:
                     straight_length = 1
                 self._entry_direction[(next_cell.x, next_cell.y)] = direction
                 self._straight_run[(next_cell.x, next_cell.y)] = straight_length
-                self._maybe_carve_extra_turn(
-                    next_cell,
-                    direction,
-                    visited,
-                    blocked={(current.x, current.y)},
-                )
             else:
                 active.pop(index)
-
-        self._add_loops()
-
-        # Open an entrance and an exit for clarity when rendering
-        if self.cell_shape == "square":
-            self.cell(0, 0).walls["N"] = False
-            self.cell(self.width - 1, self.height - 1).walls["S"] = False
-        else:
-            self.cell(0, 0).walls["W"] = False
-            self.cell(self.width - 1, self.height - 1).walls["E"] = False
 
     def _select_next_cell(
         self,
@@ -330,66 +312,6 @@ class Maze:
         diff = abs(angle_a - angle_b) % 360.0
         return diff if diff <= 180.0 else 360.0 - diff
 
-    def _coordinate_in_direction(
-        self, x: int, y: int, direction: Direction
-    ) -> Optional[Tuple[int, int]]:
-        for neighbour_direction, neighbour in self.neighbours(x, y):
-            if neighbour_direction == direction:
-                return neighbour.x, neighbour.y
-        return None
-
-    def _maybe_carve_extra_turn(
-        self,
-        cell: Cell,
-        incoming_direction: Optional[Direction],
-        visited: Set[Tuple[int, int]],
-        blocked: Optional[Set[Tuple[int, int]]] = None,
-    ) -> None:
-        if self.hairpin_chance <= 0.0:
-            return
-        if self.random.random() > self.hairpin_chance:
-            return
-
-        # Avoid opening up already spacious areas. Only consider carving an
-        # extra turn when the current cell still resembles a corridor (i.e. it
-        # has at most two existing exits). Otherwise repeatedly carving
-        # hairpins can produce large rooms with few internal walls, which makes
-        # the maze feel sparse.
-        if self._openings(cell) >= 3:
-            return
-
-        blocked_coords: Set[Tuple[int, int]] = set(blocked or set())
-        parent_coord: Optional[Tuple[int, int]] = None
-        if incoming_direction is not None:
-            parent_direction = self._opposites[incoming_direction]
-            parent_coord = self._coordinate_in_direction(cell.x, cell.y, parent_direction)
-
-        candidates: List[Tuple[Tuple[Direction, Cell], float]] = []
-        for direction, neighbour in self.neighbours(cell.x, cell.y):
-            coord = (neighbour.x, neighbour.y)
-            if coord not in visited:
-                continue
-            if coord == parent_coord or coord in blocked_coords:
-                continue
-            if not cell.walls.get(direction, True):
-                continue
-            if self._openings(neighbour) >= 3:
-                continue
-            if incoming_direction is not None:
-                angle_diff = self._angular_difference(incoming_direction, direction)
-                weight = 0.5 + (angle_diff / 180.0) * 1.5
-            else:
-                weight = 1.0
-            weight *= self.random.uniform(0.85, 1.15)
-            candidates.append(((direction, neighbour), weight))
-
-        if not candidates:
-            return
-
-        direction, neighbour = self._weighted_choice(candidates)
-        if self._can_carve_connection(cell, neighbour, direction):
-            self._remove_wall(cell, neighbour, direction)
-
     def _openings(self, cell: Cell) -> int:
         """Return the number of open sides for ``cell``."""
 
@@ -407,14 +329,228 @@ class Maze:
         q2, r2 = self._goal_axial
         return max(abs(q1 - q2), abs(r1 - r2), abs((-q1 - r1) - (-q2 - r2)))
 
-    def _add_loops(self) -> None:
-        """Optionally remove additional walls to increase complexity."""
+    # --- Solution path shaping -------------------------------------------------
 
-        if self.loop_factor <= 0:
+    def _direction_between(
+        self, origin: Tuple[int, int], target: Tuple[int, int]
+    ) -> Optional[Direction]:
+        """Return the direction that steps from ``origin`` to ``target``."""
+
+        for direction, (nx, ny) in self._neighbour_coords(*origin):
+            if (nx, ny) == target:
+                return direction
+        return None
+
+    def _set_wall(self, origin: Tuple[int, int], target: Tuple[int, int], closed: bool) -> None:
+        direction = self._direction_between(origin, target)
+        if direction is None:
+            raise ValueError(f"{origin} and {target} are not adjacent cells")
+        ox, oy = origin
+        tx, ty = target
+        self.grid[oy][ox].walls[direction] = closed
+        self.grid[ty][tx].walls[self._opposites[direction]] = closed
+
+    def _flood_from(self, origin: Tuple[int, int]) -> Dict[Tuple[int, int], int]:
+        """Breadth-first distances from ``origin`` across currently open walls."""
+
+        distances: Dict[Tuple[int, int], int] = {origin: 0}
+        queue: Deque[Tuple[int, int]] = deque([origin])
+        while queue:
+            current = queue.popleft()
+            x, y = current
+            step = distances[current] + 1
+            cell = self.cell(x, y)
+            for direction, (nx, ny) in self._neighbour_coords(x, y):
+                if not (0 <= nx < self.width and 0 <= ny < self.height):
+                    continue
+                if cell.walls.get(direction, True):
+                    continue
+                nxt = (nx, ny)
+                if nxt in distances:
+                    continue
+                distances[nxt] = step
+                queue.append(nxt)
+        return distances
+
+    def _shortest_path(self) -> List[Tuple[int, int]]:
+        """Shortest start-to-goal route across the open walls."""
+
+        start = (0, 0)
+        goal = (self.width - 1, self.height - 1)
+        parents: Dict[Tuple[int, int], Optional[Tuple[int, int]]] = {start: None}
+        queue: Deque[Tuple[int, int]] = deque([start])
+
+        while queue:
+            current = queue.popleft()
+            if current == goal:
+                break
+            x, y = current
+            cell = self.cell(x, y)
+            for direction, (nx, ny) in self._neighbour_coords(x, y):
+                if not (0 <= nx < self.width and 0 <= ny < self.height):
+                    continue
+                if cell.walls.get(direction, True):
+                    continue
+                nxt = (nx, ny)
+                if nxt in parents:
+                    continue
+                parents[nxt] = current
+                queue.append(nxt)
+
+        if goal not in parents:
+            raise RuntimeError("Maze has no solution")
+
+        path: List[Tuple[int, int]] = []
+        node: Optional[Tuple[int, int]] = goal
+        while node is not None:
+            path.append(node)
+            node = parents[node]
+        path.reverse()
+        return path
+
+    def _solution_target_length(self) -> int:
+        """Target route length (in steps) that reads as a winding, hard answer."""
+
+        total_cells = self.width * self.height
+        baseline = self._distance_to_goal(0, 0)
+        target = baseline + self.winding * 0.25 * total_cells
+        # 极端尺寸下也不要把通路拉长到接近填满整个迷宫
+        return int(round(min(target, total_cells * 0.45)))
+
+    def _try_elongate_once(
+        self, path: Sequence[Tuple[int, int]]
+    ) -> Optional[List[Tuple[int, int]]]:
+        """Reconnect the tree so the solution must take a longer detour.
+
+        The tree is cut at a random edge of the current solution (splitting it
+        into a start side and a goal side) and re-joined through a wall that
+        connects two far-apart leaves of the two halves. The route then has to
+        walk deep into one half and back out of the other, which lengthens it
+        without ever breaking the perfect-maze property.
+        """
+
+        if len(path) < 3:
+            return None
+
+        cut = self.random.randrange(len(path) - 1)
+        first, second = path[cut], path[cut + 1]
+        self._set_wall(first, second, True)
+
+        # 断开后生成树裂成两半。要算准新通路有多长，必须量「起点到 A 侧格子」
+        # 和「B 侧格子到终点」的距离；量到断口的距离会高估，因为支路可能挂在
+        # 断口之前的路径上。
+        start_side = self._flood_from(path[0])
+        goal_side = self._flood_from(path[-1])
+        total_cells = self.width * self.height
+        if len(start_side) + len(goal_side) != total_cells:
+            # 迷宫不是生成树（例如外部已加过环），放弃本次重连
+            self._set_wall(first, second, False)
+            return None
+
+        candidates: List[Tuple[Tuple[int, int], Tuple[int, int], int]] = []
+        for cell_coord, distance in start_side.items():
+            x, y = cell_coord
+            cell = self.cell(x, y)
+            for direction, (nx, ny) in self._neighbour_coords(x, y):
+                if not (0 <= nx < self.width and 0 <= ny < self.height):
+                    continue
+                if not cell.walls.get(direction, True):
+                    continue
+                other = (nx, ny)
+                other_distance = goal_side.get(other)
+                if other_distance is None:
+                    continue
+                # 新通路 = 起点到 A 侧格子 + 穿墙一步 + B 侧格子到终点
+                candidates.append((cell_coord, other, distance + 1 + other_distance))
+
+        if not candidates:
+            self._set_wall(first, second, False)
+            return None
+
+        best_length = max(item[2] for item in candidates)
+        if best_length <= len(path) - 1:
+            # 怎么接都不会更长，说明这段已达上限
+            self._set_wall(first, second, False)
+            return None
+
+        # 只在接近最优的候选里随机挑，既保证够长又不每次都挑同一个极端角落
+        threshold = int(best_length * 0.9)
+        picks = [item for item in candidates if item[2] >= threshold]
+        anchor, bridge, _ = self.random.choice(picks)
+        self._set_wall(anchor, bridge, False)
+
+        new_path = self._shortest_path()
+        if len(new_path) > len(path):
+            return new_path
+
+        # 没有变长就回滚，保持解答路径单调变长
+        self._set_wall(anchor, bridge, True)
+        self._set_wall(first, second, False)
+        return None
+
+    def _elongate_solution(self) -> None:
+        """Iteratively stretch the solution route towards its target length."""
+
+        target = self._solution_target_length()
+        path = self._shortest_path()
+        if len(path) - 1 >= target:
             return
 
         total_cells = self.width * self.height
-        attempts = int(total_cells * self.loop_factor)
+        attempts = max(16, min(300, total_cells // 4))
+        for _ in range(attempts):
+            if len(path) - 1 >= target:
+                break
+            stretched = self._try_elongate_once(path)
+            if stretched is not None:
+                path = stretched
+
+    def _path_attachment(
+        self, path: Sequence[Tuple[int, int]]
+    ) -> Dict[Tuple[int, int], int]:
+        """Map every cell to the index of the solution cell its branch hangs off."""
+
+        attachment: Dict[Tuple[int, int], int] = {}
+        queue: Deque[Tuple[Tuple[int, int], int]] = deque()
+        for index, coord in enumerate(path):
+            attachment[coord] = index
+            queue.append((coord, index))
+
+        while queue:
+            current, index = queue.popleft()
+            x, y = current
+            cell = self.cell(x, y)
+            for direction, (nx, ny) in self._neighbour_coords(x, y):
+                if not (0 <= nx < self.width and 0 <= ny < self.height):
+                    continue
+                if cell.walls.get(direction, True):
+                    continue
+                nxt = (nx, ny)
+                if nxt in attachment:
+                    continue
+                attachment[nxt] = index
+                queue.append((nxt, index))
+        return attachment
+
+    def _add_loops(self) -> None:
+        """Open extra walls in dead-end branches to create loops.
+
+        A loop is only opened between two cells that hang off the *same* cell of
+        the solution path. Such a loop starts and ends at the same attachment
+        point, so it can add alternate routes inside a dead end without ever
+        offering a shortcut across the answer. Loops that bridge two different
+        parts of the solution are skipped on purpose: those are exactly what
+        used to flatten a long answer back into a nearly straight line.
+        """
+        if self.loop_factor <= 0 and self.hairpin_chance <= 0:
+            return
+
+        total_cells = self.width * self.height
+        attempts = int(total_cells * (self.loop_factor + 0.15 * self.hairpin_chance))
+        if attempts <= 0:
+            return
+
+        attachment = self._path_attachment(self._shortest_path())
 
         for _ in range(attempts):
             x = self.random.randrange(self.width)
@@ -424,8 +560,15 @@ class Maze:
             if not neighbours:
                 continue
             direction, neighbour = self.random.choice(neighbours)
-            if cell.walls[direction] and self._can_carve_connection(cell, neighbour, direction):
-                self._remove_wall(cell, neighbour, direction)
+            if not cell.walls.get(direction, True):
+                continue
+            if self._openings(cell) >= 3 or self._openings(neighbour) >= 3:
+                continue
+
+            if attachment[(x, y)] != attachment[(neighbour.x, neighbour.y)]:
+                continue
+
+            self._remove_wall(cell, neighbour, direction)
 
     def ascii_render(self, wall_char: str = "#", path_char: str = " ") -> str:
         """Return a simple ASCII representation of the maze."""
@@ -710,6 +853,21 @@ def generate_maze(
 ) -> Maze:
     """Factory function that creates and returns a generated maze."""
 
+def generate_maze(
+    difficulty: str = "medium",
+    width: Optional[int] = None,
+    height: Optional[int] = None,
+    seed: Optional[int] = None,
+    cell_shape: str = "square",
+    winding: Optional[float] = None,
+) -> Maze:
+    """Factory function that creates and returns a generated maze.
+
+    ``winding`` overrides how hard the solution path is stretched (0 keeps the
+    shortest possible answer, 1 aims for a long meandering route). When left as
+    ``None`` the difficulty profile decides it.
+    """
+
     difficulty_profiles = {
         "easy": {
             "width": 12,
@@ -717,50 +875,32 @@ def generate_maze(
             "loop_factor": 0.05,
             "branching_chance": 0.25,
             "detour_bias": 0.25,
-            "turn_bias": 0.45,
-            "max_straight": 3,
+            "turn_bias": 0.25,
+            "max_straight": 5,
             "hairpin_chance": 0.20,
-            "max_cells": 12 * 12,
+            "winding": 0.40,
         },
         "medium": {
             "width": 20,
             "height": 20,
             "loop_factor": 0.15,
-            "branching_chance": 0.4,
+            "branching_chance": 0.40,
             "detour_bias": 0.45,
-            "turn_bias": 0.60,
-            "max_straight": 2,
-            "hairpin_chance": 0.35,
-            "max_cells": 22 * 22,
+            "turn_bias": 0.32,
+            "max_straight": 4,
+            "hairpin_chance": 0.28,
+            "winding": 0.65,
         },
         "hard": {
             "width": 28,
             "height": 28,
-            "loop_factor": 0.25,
+            "loop_factor": 0.20,
             "branching_chance": 0.55,
-            "detour_bias": 0.6,
-            "turn_bias": 0.72,
-            "max_straight": 1,
-            "hairpin_chance": 0.45,
-            "max_cells": None,
-        },
-    }
-
-    turn_profiles = {
-        "easy": {
-            "turn_bias": 0.6,
+            "detour_bias": 0.55,
+            "turn_bias": 0.40,
             "max_straight": 3,
-            "hairpin_chance": 0.2,
-        },
-        "medium": {
-            "turn_bias": 0.68,
-            "max_straight": 2,
-            "hairpin_chance": 0.33,
-        },
-        "hard": {
-            "turn_bias": 0.76,
-            "max_straight": 1,
-            "hairpin_chance": 0.42,
+            "hairpin_chance": 0.34,
+            "winding": 0.95,
         },
     }
 
@@ -772,42 +912,24 @@ def generate_maze(
 
     maze_width = width or profile["width"]
     maze_height = height or profile["height"]
-
     cell_count = maze_width * maze_height
-    # Determine loop density dynamically based on the final maze size so that
-    # custom dimensions still produce an appropriate difficulty level.
-    branching_chance = profile["branching_chance"]
 
-    detour_bias = profile["detour_bias"]
-    turn_profile = turn_profiles[difficulty]
-    turn_bias = turn_profile["turn_bias"]
-    max_straight = turn_profile["max_straight"]
-    hairpin_chance = turn_profile["hairpin_chance"]
-
-    for data in difficulty_profiles.values():
-        max_cells = data["max_cells"]
-        if max_cells is None or cell_count <= max_cells:
-            loop_factor = data["loop_factor"]
-            branching_chance = data["branching_chance"]
-            detour_bias = data["detour_bias"]
-            turn_bias = data["turn_bias"]
-            max_straight = data["max_straight"]
-            hairpin_chance = data["hairpin_chance"]
-            break
-    else:  # pragma: no cover - logically unreachable because "hard" has max_cells=None
-        loop_factor = profile["loop_factor"]
+    # 环路密度随迷宫规模温和归一化：同样的难度，大迷宫不该被环路塞满。
+    size_scale = min(1.0, (400.0 / cell_count) ** 0.25)
+    loop_factor = profile["loop_factor"] * size_scale
 
     maze = Maze(
         width=maze_width,
         height=maze_height,
         seed=seed,
         loop_factor=loop_factor,
-        branching_chance=branching_chance,
+        branching_chance=profile["branching_chance"],
         cell_shape=cell_shape,
-        detour_bias=detour_bias,
-        turn_bias=turn_bias,
-        max_straight=max_straight,
-        hairpin_chance=hairpin_chance,
+        detour_bias=profile["detour_bias"],
+        turn_bias=profile["turn_bias"],
+        max_straight=profile["max_straight"],
+        hairpin_chance=profile["hairpin_chance"],
+        winding=profile["winding"] if winding is None else winding,
     )
     maze.generate()
     return maze
